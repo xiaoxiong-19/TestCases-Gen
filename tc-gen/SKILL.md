@@ -25,8 +25,20 @@ description: 基于版本迭代需求文档，结合 shcj-common/.dev-standards 
 
 1. 在代码项目根目录下检查 `.test-standards`。
 2. 如果 `.test-standards` 不存在，则创建；如果已存在，不重复初始化根目录，不覆盖其中已有文件。
-3. 在 `.test-standards` 下创建版本目录：`.test-standards/<版本>/`。
-4. 在版本目录下创建：
+3. 初始化版本目录时，必须使用本 skill 内置 UTF-8 脚本，禁止用 PowerShell/cmd 直接 `mkdir` 或 `New-Item` 创建含中文版本目录：
+
+```bash
+python ".cursor/skills/tc-gen/scripts/init_version_utf8.py" "<项目根目录>" "<版本>"
+```
+
+4. 如果 `<版本>` 包含中文、空格或 shell 中显示乱码，先把版本名写入 UTF-8 文本文件首行，再使用 `--version-file`，避免 Windows GBK/CP936 终端把中文参数解码错误：
+
+```bash
+python ".cursor/skills/tc-gen/scripts/init_version_utf8.py" "<项目根目录>" --version-file "<UTF-8版本名文件>"
+```
+
+5. 脚本会在 `.test-standards` 下创建版本目录：`.test-standards/<版本>/`。
+6. 在版本目录下创建：
 
 ```text
 .test-standards/<版本>/
@@ -37,9 +49,34 @@ description: 基于版本迭代需求文档，结合 shcj-common/.dev-standards 
 └── output/            # 阶段产物目录，沿用原 output 逻辑
 ```
 
-5. 如果版本目录已存在，只补齐缺失子目录，不删除、不覆盖已有输入或输出。
-6. 初始化完成后，提示用户把需求文档放到 `input/prodword/`，把接口/三方/联动资料放到 `input/reference/`。`input/prodword/prodword_pic/` 由转换流程存放需求文档图片，用户也可手动补充流程图原图。
-7. `.test-standards` 根目录下不得直接创建版本无关的 `input/` 或 `output/`。
+7. 如果版本目录已存在，只补齐缺失子目录，不删除、不覆盖已有输入或输出。
+8. 初始化完成后，提示用户把需求文档放到 `input/prodword/`，把接口/三方/联动资料放到 `input/reference/`。`input/prodword/prodword_pic/` 由转换流程存放需求文档图片，用户也可手动补充流程图原图。
+9. `.test-standards` 根目录下不得直接创建版本无关的 `input/` 或 `output/`。
+
+### 初始化编码要求
+
+- 所有版本目录初始化必须走 `tc-gen/scripts/init_version_utf8.py`。
+- 含中文版本名时优先使用 `--version-file`，版本名文件必须以 UTF-8 或 UTF-8 with BOM 保存。
+- 初始化脚本只创建目录，不覆盖已有输入文件和阶段产物。
+- Agent 不得用 shell 内嵌中文命令创建版本目录，例如 `mkdir ".test-standards/V1.0.0-支付宝"`、`New-Item`、`python -c "..."`。
+
+### 版本输入发现要求
+
+- 阶段0开始前，必须先运行本 skill 内置 UTF-8 脚本发现版本目录和输入文件，禁止用 `Glob` 直接扫描 `.test-standards/<中文版本>/`：
+
+```bash
+python ".cursor/skills/tc-gen/scripts/list_version_inputs_utf8.py" "<项目根目录>" "<版本>"
+```
+
+- 如果 `<版本>` 含中文、空格或 shell 中显示乱码，优先使用 `--version-file`；如果只有前缀是 ASCII 且能唯一匹配，也可以用 `--version-prefix`：
+
+```bash
+python ".cursor/skills/tc-gen/scripts/list_version_inputs_utf8.py" "<项目根目录>" --version-file "<UTF-8版本名文件>"
+python ".cursor/skills/tc-gen/scripts/list_version_inputs_utf8.py" "<项目根目录>" --version-prefix "V1.0.0-saas"
+```
+
+- 脚本输出 JSON，包含 `versionRoot`、`input/prodword`、`prodword_pic`、`input/reference`、`output` 的存在性和文件清单。后续读取、转换、图片解析必须以该 JSON 中的绝对路径为准。
+- 若 `Glob` 返回 0 个文件但脚本能找到文件，以脚本结果为准；不得据此判断用户未初始化或未放文件。
 
 ## MCP 使用规则
 
@@ -84,7 +121,7 @@ description: 基于版本迭代需求文档，结合 shcj-common/.dev-standards 
 ## 阶段0：准备（读取输入 + MCP需求校验）
 
 1. 明确当前处理的 `<版本>`；若用户未给出版本，先询问，不要把产物写到 `.test-standards` 根目录。
-2. 列出 `.test-standards/<版本>/input/prodword/`、`.test-standards/<版本>/input/prodword/prodword_pic/` 和 `.test-standards/<版本>/input/reference/` 下的所有文件。
+2. 使用 `tc-gen/scripts/list_version_inputs_utf8.py` 列出 `.test-standards/<版本>/input/prodword/`、`.test-standards/<版本>/input/prodword/prodword_pic/` 和 `.test-standards/<版本>/input/reference/` 下的所有文件；Windows/中文路径场景禁止用 `Glob` 的空结果作为缺文件结论。
 3. 对每个 `.docx` / `.doc` 转换为同名 `.md` 放回 `input/prodword/`（保留原文件），并同步抽取 Word 内图片到 `input/prodword/prodword_pic/`。转换后的 md 中图片引用应尽量指向 `prodword_pic/` 下的文件；无法自动建立引用时，必须在 md 附近标注 `[图片：prodword_pic/<文件名>，需人工/AI查看]`。
 4. 读取需求文档 + 全部联动文档 + `prodword_pic/` 下图片。三方接口文档特别留意：接口入参/出参/异常码/超时/重试/幂等。
 5. 解析需求 md 时，搜索“流程图”“业务流程”“流程”“时序图”“泳道图”“状态流转”“节点”“步骤”等字眼，定位其附近图片引用；对这些图片必须重点查看并提炼流程节点、角色、分支、状态迁移、接口调用顺序和异常路径。图片内容与正文冲突时，单独列为疑点。
