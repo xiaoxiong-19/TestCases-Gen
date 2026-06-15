@@ -155,12 +155,11 @@ def topic(
 
 
 def build_step_expected_children(steps: List[str], expected: List[str]) -> List[dict]:
-    """Attach one steps node, then numbered expected nodes as same-level siblings."""
-    children: List[dict] = []
+    """Attach one steps node; numbered expected nodes hang under it in order."""
+    expected_topics = [topic(line) for line in expected]
     if steps:
-        children.append(topic("\n".join(steps)))
-    children.extend(topic(line) for line in expected)
-    return children
+        return [topic("\n".join(steps), expected_topics or None)]
+    return expected_topics
 
 
 def build_case_title_tree(
@@ -176,9 +175,9 @@ def build_case_title_tree(
       起始父节点 (task-done)
         └── ... 中间父节点 ...
               └── 末级用例名 (priority-N)
-                    ├── 全部步骤（一个子节点，多行）
-                    ├── 1、预期一
-                    └── 2、预期二
+                    └── 全部步骤（一个子节点，多行）
+                          ├── 1、预期一
+                          └── 2、预期二
     """
     parts = title_parts if title_parts else ["未命名用例"]
     priority_marker = PRIORITY_MARKERS[level]
@@ -258,7 +257,7 @@ def write_xmind(content: List[dict], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     active_sheet_id = content[0]["id"]
     metadata = {
-        "creator": {"name": "tc-convert", "version": "2.4.0"},
+        "creator": {"name": "tc-convert", "version": "2.4.1"},
         "activeSheetId": active_sheet_id,
     }
     manifest = {
