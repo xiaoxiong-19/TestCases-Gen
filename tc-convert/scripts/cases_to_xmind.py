@@ -74,6 +74,20 @@ def split_lines(value: str) -> List[str]:
     return [line for line in lines if line]
 
 
+def strip_expected_prefix(text: str) -> str:
+    return re.sub(r"^\d+[、.]\s*", "", text.strip())
+
+
+def split_expected(value: str) -> List[str]:
+    """Split expected results by Chinese semicolon and number as 1、xxx, 2、yyy."""
+    value = normalize_text(value)
+    if not value:
+        return []
+    parts = [strip_expected_prefix(part) for part in value.split("；")]
+    parts = [part for part in parts if part]
+    return [f"{idx}、{part}" for idx, part in enumerate(parts, start=1)]
+
+
 def parse_cases(markdown: str) -> List[Dict[str, str]]:
     cases: List[Dict[str, str]] = []
     active_header: Optional[List[str]] = None
@@ -141,7 +155,7 @@ def topic(
 
 
 def build_step_expected_children(steps: List[str], expected: List[str]) -> List[dict]:
-    """Attach one steps node, then expected result nodes as siblings."""
+    """Attach one steps node, then numbered expected nodes as same-level siblings."""
     children: List[dict] = []
     if steps:
         children.append(topic("\n".join(steps)))
@@ -163,8 +177,8 @@ def build_case_title_tree(
         └── ... 中间父节点 ...
               └── 末级用例名 (priority-N)
                     ├── 全部步骤（一个子节点，多行）
-                    ├── 预期1
-                    └── 预期2
+                    ├── 1、预期一
+                    └── 2、预期二
     """
     parts = title_parts if title_parts else ["未命名用例"]
     priority_marker = PRIORITY_MARKERS[level]
@@ -200,7 +214,7 @@ def add_case(module_nodes: Dict[str, dict], root_children: List[dict], case: Dic
 
     title_parts = [part.strip() for part in case["用例标题"].split("/") if part.strip()]
     steps = split_lines(case["用例步骤"])
-    expected = split_lines(case["预期结果"])
+    expected = split_expected(case["预期结果"])
     precondition = case.get("前置条件", "").strip()
     note = f"前置条件：{precondition}" if precondition else ""
 
@@ -244,7 +258,7 @@ def write_xmind(content: List[dict], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     active_sheet_id = content[0]["id"]
     metadata = {
-        "creator": {"name": "tc-convert", "version": "2.2.0"},
+        "creator": {"name": "tc-convert", "version": "2.4.0"},
         "activeSheetId": active_sheet_id,
     }
     manifest = {
