@@ -25,6 +25,9 @@ from typing import Dict, Iterable, List, Optional
 REQUIRED_COLUMNS = ["用例等级", "所属模块", "用例标题", "用例步骤", "预期结果"]
 OPTIONAL_COLUMNS = ["前置条件"]
 
+# 根节点结构：逻辑图向右
+ROOT_STRUCTURE_CLASS = "org.xmind.ui.logic.right"
+
 # 任务进度：用例名称起始父节点固定使用「任务完成」
 TASK_DONE_MARKER = "task-done"
 
@@ -119,6 +122,7 @@ def topic(
     children: Optional[List[dict]] = None,
     note: str = "",
     markers: Optional[List[str]] = None,
+    structure_class: str = "",
 ) -> dict:
     data = {
         "id": new_id(),
@@ -131,7 +135,18 @@ def topic(
         data["notes"] = {"plain": {"content": note}}
     if markers:
         data["markers"] = [{"markerId": marker_id} for marker_id in markers]
+    if structure_class:
+        data["structureClass"] = structure_class
     return data
+
+
+def build_step_expected_children(steps: List[str], expected: List[str]) -> List[dict]:
+    """Attach one steps node, then expected result nodes as siblings."""
+    children: List[dict] = []
+    if steps:
+        children.append(topic("\n".join(steps)))
+    children.extend(topic(line) for line in expected)
+    return children
 
 
 def build_case_title_tree(
@@ -147,17 +162,14 @@ def build_case_title_tree(
       起始父节点 (task-done)
         └── ... 中间父节点 ...
               └── 末级用例名 (priority-N)
-                    ├── 步骤1
-                    ├── 步骤2
+                    ├── 全部步骤（一个子节点，多行）
                     ├── 预期1
                     └── 预期2
     """
     parts = title_parts if title_parts else ["未命名用例"]
     priority_marker = PRIORITY_MARKERS[level]
 
-    step_topics = [topic(line) for line in steps]
-    expected_topics = [topic(line) for line in expected]
-    leaf_children = step_topics + expected_topics
+    leaf_children = build_step_expected_children(steps, expected)
 
     if len(parts) == 1:
         markers = [TASK_DONE_MARKER, priority_marker]
@@ -202,7 +214,7 @@ def build_xmind(version_name: str, cases: Iterable[Dict[str, str]]) -> List[dict
     for case in cases:
         add_case(module_nodes, root_children, case)
 
-    root_topic = topic(version_name, root_children)
+    root_topic = topic(version_name, root_children, structure_class=ROOT_STRUCTURE_CLASS)
     return [
         {
             "id": new_id(),
@@ -232,7 +244,7 @@ def write_xmind(content: List[dict], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     active_sheet_id = content[0]["id"]
     metadata = {
-        "creator": {"name": "tc-convert", "version": "2.0.0"},
+        "creator": {"name": "tc-convert", "version": "2.2.0"},
         "activeSheetId": active_sheet_id,
     }
     manifest = {
