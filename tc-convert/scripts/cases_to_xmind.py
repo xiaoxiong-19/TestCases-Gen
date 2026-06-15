@@ -8,7 +8,7 @@ Usage:
 Input markdown must contain table columns:
   用例等级 | 所属模块 | 用例标题 | 前置条件 | 用例步骤 | 预期结果
 
-Only 前置条件 is optional. It is written as a note on the case-title topic.
+Only 前置条件 is optional. It is written as a note on the last case-title topic.
 """
 
 from __future__ import annotations
@@ -24,6 +24,17 @@ from typing import Dict, Iterable, List, Optional
 
 REQUIRED_COLUMNS = ["用例等级", "所属模块", "用例标题", "用例步骤", "预期结果"]
 OPTIONAL_COLUMNS = ["前置条件"]
+
+# 任务进度：用例名称起始父节点固定使用「任务完成」
+TASK_DONE_MARKER = "task-done"
+
+# 任务优先级：用例等级 -> XMind priority marker
+PRIORITY_MARKERS = {
+    "1": "priority-1",
+    "2": "priority-2",
+    "3": "priority-3",
+    "4": "priority-4",
+}
 
 
 def new_id() -> str:
@@ -96,14 +107,19 @@ def parse_cases(markdown: str) -> List[Dict[str, str]]:
         missing = [col for col in REQUIRED_COLUMNS if not item.get(col)]
         if missing:
             raise ValueError(f"用例表存在必填字段为空: {', '.join(missing)}; 行内容={cells}")
-        if item["用例等级"] not in {"1", "2", "3", "4"}:
+        if item["用例等级"] not in PRIORITY_MARKERS:
             raise ValueError(f"用例等级只允许 1/2/3/4: {item['用例等级']} ({item['用例标题']})")
         cases.append(item)
 
     return cases
 
 
-def topic(title: str, children: Optional[List[dict]] = None, note: str = "") -> dict:
+def topic(
+    title: str,
+    children: Optional[List[dict]] = None,
+    note: str = "",
+    markers: Optional[List[str]] = None,
+) -> dict:
     data = {
         "id": new_id(),
         "class": "topic",
@@ -113,14 +129,44 @@ def topic(title: str, children: Optional[List[dict]] = None, note: str = "") -> 
         data["children"] = {"attached": children}
     if note:
         data["notes"] = {"plain": {"content": note}}
+    if markers:
+        data["markers"] = [{"markerId": marker_id} for marker_id in markers]
     return data
 
 
-def lines_topic(title: str, value: str) -> dict:
-    lines = split_lines(value)
-    if not lines:
-        return topic(title)
-    return topic(title, [topic(line) for line in lines])
+def build_case_title_tree(
+    title_parts: List[str],
+    level: str,
+    steps: List[str],
+    expected: List[str],
+    note: str,
+) -> dict:
+    """Build case title hierarchy with icons, then attach steps and expected results.
+
+    Structure:
+      起始父节点 (task-done)
+        └── ... 中间父节点 ...
+              └── 末级用例名 (priority-N)
+                    ├── 步骤1
+                    ├── 步骤2
+                    ├── 预期1
+                    └── 预期2
+    """
+    parts = title_parts if title_parts else ["未命名用例"]
+    priority_marker = PRIORITY_MARKERS[level]
+
+    step_topics = [topic(line) for line in steps]
+    expected_topics = [topic(line) for line in expected]
+    leaf_children = step_topics + expected_topics
+
+    if len(parts) == 1:
+        markers = [TASK_DONE_MARKER, priority_marker]
+        return topic(parts[0], leaf_children or None, note=note, markers=markers)
+
+    current = topic(parts[-1], leaf_children or None, note=note, markers=[priority_marker])
+    for part in reversed(parts[1:-1]):
+        current = topic(part, [current])
+    return topic(parts[0], [current], markers=[TASK_DONE_MARKER])
 
 
 def add_case(module_nodes: Dict[str, dict], root_children: List[dict], case: Dict[str, str]) -> None:
@@ -140,18 +186,13 @@ def add_case(module_nodes: Dict[str, dict], root_children: List[dict], case: Dic
             parent_children.append(node)
         parent_children = node.setdefault("children", {}).setdefault("attached", [])
 
-    level = case["用例等级"]
-    title_text = f"【等级{level}】{case['用例标题']}"
+    title_parts = [part.strip() for part in case["用例标题"].split("/") if part.strip()]
+    steps = split_lines(case["用例步骤"])
+    expected = split_lines(case["预期结果"])
     precondition = case.get("前置条件", "").strip()
     note = f"前置条件：{precondition}" if precondition else ""
-    case_node = topic(
-        title_text,
-        [
-            lines_topic("用例步骤", case["用例步骤"]),
-            lines_topic("预期结果", case["预期结果"]),
-        ],
-        note=note,
-    )
+
+    case_node = build_case_title_tree(title_parts, case["用例等级"], steps, expected, note)
     parent_children.append(case_node)
 
 
@@ -191,7 +232,7 @@ def write_xmind(content: List[dict], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     active_sheet_id = content[0]["id"]
     metadata = {
-        "creator": {"name": "tc-convert", "version": "1.0.0"},
+        "creator": {"name": "tc-convert", "version": "2.0.0"},
         "activeSheetId": active_sheet_id,
     }
     manifest = {
