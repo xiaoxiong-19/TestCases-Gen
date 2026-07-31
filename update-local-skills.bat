@@ -5,14 +5,9 @@ chcp 65001 >nul
 
 set "REPO_URL=https://github.com/xiaoxiong-19/TestCases-Gen.git"
 set "REPO_DIR=%~dp0"
-set "TARGET_ROOT=%USERPROFILE%\.cursor\skills"
-
-if not "%~1"=="" (
-  set "TARGET_ROOT=%~1"
-)
+set "SYNCED_ANY=0"
 
 echo [INFO] Skill repo: %REPO_DIR%
-echo [INFO] Target skills: %TARGET_ROOT%
 echo.
 
 where git >nul 2>nul
@@ -59,18 +54,48 @@ git fetch origin "%BRANCH%" || goto :fail
 echo [INFO] Pulling latest changes with --ff-only ...
 git pull --ff-only origin "%BRANCH%" || goto :fail
 
-if not exist "%TARGET_ROOT%" (
-  echo [INFO] Creating target directory: %TARGET_ROOT%
-  mkdir "%TARGET_ROOT%" || goto :fail
+echo.
+
+if not "%~1"=="" (
+  call :sync_target "%~1" || goto :fail
+) else (
+  call :sync_target_if_exists "%USERPROFILE%\.cursor" || goto :fail
+  call :sync_target_if_exists "%USERPROFILE%\.trae-cn" || goto :fail
+  call :sync_target_if_exists "%USERPROFILE%\.codex" || goto :fail
 )
 
-call :copy_skill "tc-gen" || goto :fail
-call :copy_skill "tc-convert" || goto :fail
+if "!SYNCED_ANY!"=="0" (
+  echo [ERROR] No target directory found among .cursor, .trae-cn, .codex under %USERPROFILE%
+  goto :fail
+)
 
 echo.
-echo [OK] Local Cursor skills updated successfully.
-echo [OK] Target: %TARGET_ROOT%
+echo [OK] Local skills updated successfully.
 goto :done
+
+:sync_target_if_exists
+set "ROOT=%~1"
+if not exist "%ROOT%" (
+  echo [INFO] Skip missing: %ROOT%
+  exit /b 0
+)
+call :sync_target "%ROOT%\skills"
+exit /b %ERRORLEVEL%
+
+:sync_target
+set "TARGET_ROOT=%~1"
+echo [INFO] Target skills: %TARGET_ROOT%
+
+if not exist "%TARGET_ROOT%" (
+  echo [INFO] Creating target directory: %TARGET_ROOT%
+  mkdir "%TARGET_ROOT%" || exit /b 1
+)
+
+call :copy_skill "tc-gen" || exit /b 1
+call :copy_skill "tc-convert" || exit /b 1
+set "SYNCED_ANY=1"
+echo.
+exit /b 0
 
 :copy_skill
 set "SKILL_NAME=%~1"
@@ -97,6 +122,8 @@ exit /b 0
 :fail
 echo.
 echo [FAILED] Update did not complete.
+echo.
+pause
 exit /b 1
 
 :done
