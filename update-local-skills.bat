@@ -91,8 +91,20 @@ if not exist "%TARGET_ROOT%" (
   mkdir "%TARGET_ROOT%" || exit /b 1
 )
 
-call :copy_skill "tc-gen" || exit /b 1
-call :copy_skill "tc-convert" || exit /b 1
+rem Sync every subdirectory that contains SKILL.md (no fixed skill list)
+set "FOUND_SKILL=0"
+for /d %%D in ("%REPO_DIR%*") do (
+  if exist "%%~fD\SKILL.md" (
+    call :copy_skill "%%~nxD"
+    if errorlevel 1 exit /b 1
+    set "FOUND_SKILL=1"
+  )
+)
+
+if "!FOUND_SKILL!"=="0" (
+  echo [WARN] No skill directories with SKILL.md found under: %REPO_DIR%
+)
+
 set "SYNCED_ANY=1"
 echo.
 exit /b 0
