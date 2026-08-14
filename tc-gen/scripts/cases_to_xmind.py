@@ -88,6 +88,10 @@ def split_expected(value: str) -> List[str]:
     return [f"{idx}、{part}" for idx, part in enumerate(parts, start=1)]
 
 
+def is_example_case(title: str) -> bool:
+    return bool(re.match(r"^示例[:：]", title.strip()))
+
+
 def parse_cases(markdown: str) -> List[Dict[str, str]]:
     cases: List[Dict[str, str]] = []
     active_header: Optional[List[str]] = None
@@ -97,6 +101,8 @@ def parse_cases(markdown: str) -> List[Dict[str, str]]:
     for raw_line in markdown.splitlines():
         cells = split_md_row(raw_line)
         if not cells:
+            if not raw_line.strip():
+                continue
             active_header = None
             active_indexes = {}
             expecting_separator = False
@@ -121,11 +127,26 @@ def parse_cases(markdown: str) -> List[Dict[str, str]]:
         item = {col: normalize_text(cells[idx]) for col, idx in active_indexes.items() if idx < len(cells)}
         if not any(item.get(col) for col in REQUIRED_COLUMNS):
             continue
+        if is_example_case(item.get("用例标题", "")):
+            continue
+
+        header_cells = [cell.strip() for cell in cells]
+        looks_like_header = all(col in header_cells for col in REQUIRED_COLUMNS)
         missing = [col for col in REQUIRED_COLUMNS if not item.get(col)]
-        if missing:
-            raise ValueError(f"用例表存在必填字段为空: {', '.join(missing)}; 行内容={cells}")
-        if item["用例等级"] not in PRIORITY_MARKERS:
-            raise ValueError(f"用例等级只允许 1/2/3/4: {item['用例等级']} ({item['用例标题']})")
+        if missing or item.get("用例等级") not in PRIORITY_MARKERS:
+            if looks_like_header:
+                active_header = header_cells
+                active_indexes = {
+                    col: header_cells.index(col)
+                    for col in REQUIRED_COLUMNS + OPTIONAL_COLUMNS
+                    if col in header_cells
+                }
+                expecting_separator = True
+                continue
+            if missing and item.get("用例标题"):
+                raise ValueError(f"用例表存在必填字段为空: {', '.join(missing)}; 行内容={cells}")
+            continue
+
         cases.append(item)
 
     return cases
@@ -283,7 +304,7 @@ def main() -> int:
         print(f"ERR 找不到用例文件: {md_path}")
         return 1
 
-    markdown = md_path.read_text(encoding="utf-8")
+    markdown = md_path.read_text(encoding="utf-8-sig")
     cases = parse_cases(markdown)
     if not cases:
         print(f"ERR 未解析到用例。请确认表头包含: {' | '.join(REQUIRED_COLUMNS)}")

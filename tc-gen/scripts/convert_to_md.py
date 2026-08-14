@@ -21,18 +21,18 @@ Dependencies:
 
 from __future__ import annotations
 
-import os
 import re
 import sys
 import zipfile
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List
 from xml.etree import ElementTree as ET
+
+from utf8_paths import configure_stdio
 
 
 W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 R_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
-A_NS = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
 REL_NS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 
 
@@ -42,15 +42,30 @@ def safe_name(value: str) -> str:
     return value or "image"
 
 
+def md_cell(value: str) -> str:
+    return (value or "").replace("|", "\\|")
+
+
 def cell_text(cell) -> str:
     texts = []
     for paragraph in getattr(cell, "paragraphs", []) or []:
-        text = (paragraph.text or "").strip().replace("|", "\\|")
+        text = md_cell((paragraph.text or "").strip())
         if text:
             texts.append(text)
     if texts:
         return "<br>".join(texts)
-    return " ".join((cell.text or "").split()).replace("|", "\\|")
+    return md_cell(" ".join((cell.text or "").split()))
+
+
+def cell_image_lines(xml_element, image_map: Dict[str, str]) -> List[str]:
+    return [f"![图片]({image_map[rid]})" for rid in image_refs_from_xml(xml_element) if rid in image_map]
+
+
+def cell_md(cell, image_map: Dict[str, str]) -> str:
+    parts = [cell_text(cell)]
+    for paragraph in getattr(cell, "paragraphs", []) or []:
+        parts.extend(cell_image_lines(paragraph._element, image_map))
+    return "<br>".join(part for part in parts if part)
 
 
 def heading_prefix(style_name: str) -> str | None:
@@ -148,11 +163,11 @@ def docx_to_md(path: Path, pic_dir: Path) -> str:
             rows = t.rows
             if not rows:
                 continue
-            header = [cell_text(c) for c in rows[0].cells]
+            header = [cell_md(c, image_map).replace("\n", "<br>") for c in rows[0].cells]
             out.append("| " + " | ".join(header) + " |")
             out.append("| " + " | ".join(["---"] * len(header)) + " |")
             for r in rows[1:]:
-                cells = [cell_text(c).replace("\n", "<br>") for c in r.cells]
+                cells = [cell_md(c, image_map).replace("\n", "<br>") for c in r.cells]
                 out.append("| " + " | ".join(cells) + " |")
             out.append("")
 
@@ -170,6 +185,12 @@ def _el_text(el) -> str:
         elif tag in ("br", "cr"):
             parts.append("\n")
     return "".join(parts)
+
+
+def raw_cell_md(cell_el, image_map: Dict[str, str]) -> str:
+    text = md_cell(_el_text(cell_el).strip().replace("\n", "<br>"))
+    images = cell_image_lines(cell_el, image_map)
+    return "<br>".join(part for part in [text, *images] if part)
 
 
 def docx_to_md_raw(path: Path, pic_dir: Path) -> str:
@@ -211,7 +232,7 @@ def docx_to_md_raw(path: Path, pic_dir: Path) -> str:
             md_rows: List[List[str]] = []
             for r in rows:
                 cells = r.findall(f"{W_NS}tc")
-                md_rows.append([_el_text(c).strip().replace("\n", "<br>") for c in cells])
+                md_rows.append([raw_cell_md(c, image_map) for c in cells])
             width = max(len(r) for r in md_rows)
             md_rows = [r + [""] * (width - len(r)) for r in md_rows]
             out.append("| " + " | ".join(md_rows[0]) + " |")
@@ -233,7 +254,7 @@ def xlsx_to_md(path: Path) -> str:
         for row in ws.iter_rows(values_only=True):
             if row is None:
                 continue
-            vals = ["" if v is None else str(v).replace("\n", "<br>").strip() for v in row]
+            vals = ["" if v is None else md_cell(str(v).replace("\n", "<br>").strip()) for v in row]
             if any(v for v in vals):
                 rows.append(vals)
         if not rows:
@@ -341,6 +362,7 @@ def parse_args(argv: List[str]):
 
 
 def main(argv: List[str] | None = None) -> int:
+    configure_stdio()
     args = parse_args(argv if argv is not None else sys.argv[1:])
     base = Path(args.directory).resolve()
     pic_dir = Path(args.pic_dir).resolve() if args.pic_dir else None

@@ -2,42 +2,27 @@
 """Initialize tc-gen version directories with UTF-8-safe input.
 
 Usage:
-  python ".cursor/skills/tc-gen/scripts/init_version_utf8.py" "<project_root>" "<version>"
-  python ".cursor/skills/tc-gen/scripts/init_version_utf8.py" "<project_root>" --version-file "<utf8_file>"
+  python init_version_utf8.py "<project_root>" "<version>"
+  python init_version_utf8.py "<project_root>" --version-file "<utf8_file>"
+  python init_version_utf8.py "<project_root>" --version-prefix "V1.6.1"
 
-When the version name contains Chinese characters, prefer --version-file so the
-shell does not need to carry non-ASCII arguments.
+When creating a new version whose name contains Chinese characters, prefer
+--version-file so the shell does not need to carry non-ASCII arguments.
+When the version directory already exists, --version-prefix is enough.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
+import json
 import sys
 from pathlib import Path
 
-
-UTF8 = "utf-8"
-
-
-def configure_stdio() -> None:
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding=UTF8, errors="replace")
-    if sys.platform == "win32":
-        os.system("chcp 65001 >nul 2>&1")
-
-
-def read_version(args: argparse.Namespace) -> str:
-    if args.version_file:
-        text = Path(args.version_file).read_text(encoding="utf-8-sig")
-        version = text.splitlines()[0].strip() if text.splitlines() else ""
-    else:
-        version = (args.version or "").strip()
-
-    if not version:
-        raise ValueError("version is required")
-    return version
+from utf8_paths import (
+    add_version_args,
+    configure_stdio,
+    resolve_version_name_for_init,
+)
 
 
 def init_version(project_root: Path, version: str) -> Path:
@@ -59,12 +44,7 @@ def init_version(project_root: Path, version: str) -> Path:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Initialize tc-gen version directories safely.")
-    parser.add_argument("project_root", help="Project root directory")
-    parser.add_argument("version", nargs="?", help="Version name")
-    parser.add_argument(
-        "--version-file",
-        help="UTF-8 text file whose first line is the version name",
-    )
+    add_version_args(parser)
     return parser.parse_args(argv)
 
 
@@ -72,14 +52,30 @@ def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     try:
         args = parse_args(argv or sys.argv[1:])
-        version = read_version(args)
-        version_root = init_version(Path(args.project_root).resolve(), version)
+        project_root = Path(args.project_root).resolve()
+        version = resolve_version_name_for_init(project_root, args)
+        version_root = init_version(project_root, version)
     except Exception as exc:
-        print(f"ERR {exc}")
+        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=True, indent=2))
         return 1
 
-    print(f"OK version directory initialized: {version_root}")
-    print("OK subdirectories: input/prodword/prodword_pic, input/reference, output")
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "projectRoot": str(project_root),
+                "version": version,
+                "versionRoot": str(version_root),
+                "subdirectories": [
+                    "input/prodword/prodword_pic",
+                    "input/reference",
+                    "output",
+                ],
+            },
+            ensure_ascii=True,
+            indent=2,
+        )
+    )
     return 0
 
 

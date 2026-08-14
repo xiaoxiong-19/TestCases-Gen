@@ -13,32 +13,17 @@ to convert to XMind. Do not auto-run at the end of stage 4.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import sys
 from pathlib import Path
 
-from list_version_inputs_utf8 import configure_stdio, resolve_version_dir
-
-
-def load_cases_to_xmind():
-    path = Path(__file__).resolve().parent / "cases_to_xmind.py"
-    if not path.is_file():
-        raise FileNotFoundError("cases_to_xmind.py not found next to this script: {}".format(path))
-    spec = importlib.util.spec_from_file_location("tc_gen_cases_to_xmind", str(path))
-    if spec is None or spec.loader is None:
-        raise ImportError("cannot load cases_to_xmind.py from {}".format(path))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module, path
+import cases_to_xmind
+from utf8_paths import add_version_args, configure_stdio, resolve_version_dir
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Convert tc-gen test cases markdown to XMind.")
-    parser.add_argument("project_root", help="Project root directory")
-    parser.add_argument("version", nargs="?", help="Version name")
-    parser.add_argument("--version-file", help="UTF-8 text file whose first line is the version name")
-    parser.add_argument("--version-prefix", help="ASCII-safe prefix used to find exactly one version directory")
+    add_version_args(parser)
     return parser.parse_args(argv)
 
 
@@ -48,7 +33,6 @@ def main(argv: list[str] | None = None) -> int:
         args = parse_args(argv or sys.argv[1:])
         project_root = Path(args.project_root).resolve()
         version_root = resolve_version_dir(project_root, args)
-        xmind_module, script_path = load_cases_to_xmind()
     except Exception as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=True, indent=2))
         return 1
@@ -70,12 +54,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        markdown = md_path.read_text(encoding="utf-8")
-        cases = xmind_module.parse_cases(markdown)
+        markdown = md_path.read_text(encoding="utf-8-sig")
+        cases = cases_to_xmind.parse_cases(markdown)
         if not cases:
             raise ValueError("no cases parsed; check table headers")
-        content = xmind_module.build_xmind(version_root.name, cases)
-        xmind_module.write_xmind(content, output_path)
+        content = cases_to_xmind.build_xmind(version_root.name, cases)
+        cases_to_xmind.write_xmind(content, output_path)
     except Exception as exc:
         print(json.dumps({"ok": False, "error": str(exc), "markdown": str(md_path)}, ensure_ascii=True, indent=2))
         return 1
@@ -87,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
                 "projectRoot": str(project_root),
                 "version": version_root.name,
                 "versionRoot": str(version_root),
-                "convertScript": str(script_path),
+                "convertScript": str(Path(cases_to_xmind.__file__).resolve()),
                 "markdown": str(md_path),
                 "xmind": str(output_path),
                 "caseCount": len(cases),

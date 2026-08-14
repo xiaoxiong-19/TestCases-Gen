@@ -73,7 +73,7 @@ update-local-skills.bat
 tc-gen 初始化版本 V1.12.0-xxx
 ```
 
-Agent 会通过 skill 内置 UTF-8 脚本创建目录（含中文版本名时优先 `--version-file`），不要用 PowerShell/`mkdir` 硬建中文路径。
+Agent 会通过 skill 内置 UTF-8 脚本创建目录。含中文版本名时：目录尚不存在用 `--version-file`（写到系统临时目录）；目录已存在用 `--version-prefix`。不要用 PowerShell/`mkdir` 硬建中文路径。
 
 初始化后请放入：
 
@@ -172,9 +172,11 @@ python "<本skill目录>/scripts/convert_version_inputs_utf8.py" "<项目根>" -
 python "<本skill目录>/scripts/convert_to_md.py" ".test-standards/<版本>/input/prodword"
 ```
 
-- `.docx` → 同名 `.md`，图片抽到 `prodword_pic/`
-- `.xlsx` → Markdown 表格
+- `.docx` → 同名 `.md`，图片抽到 `prodword_pic/`（含表格内图片）
+- `.xlsx` → Markdown 表格（单元格 `|` 会转义）
+- `.doc` / `.xls` 不转，需另存为 `.docx` / `.xlsx` 后重跑
 - 保留原始文件不删除
+- 依赖：`pip install -r "<本skill目录>/scripts/requirements.txt"`
 - **不要**用 pandoc / mammoth 或现场编写转换脚本（mammoth 会把 Word 表格展平）
 
 已无独立 `tc-convert` skill；上述脚本均在 `tc-gen/scripts/`。
@@ -256,7 +258,9 @@ TestCases-Gen/
 │       ├── convert_version_inputs_utf8.py  # 阶段0：docx/xlsx → md
 │       ├── convert_to_md.py
 │       ├── convert_cases_to_xmind_utf8.py  # 阶段4后用户同意：md → xmind
-│       └── cases_to_xmind.py
+│       ├── cases_to_xmind.py
+│       ├── utf8_paths.py                   # 版本路径/UTF-8 公共逻辑
+│       └── requirements.txt                # python-docx、openpyxl
 └── pic-to-vue/
     ├── SKILL.md              # 正文标题：proto-to-vue
     └── reference.md
