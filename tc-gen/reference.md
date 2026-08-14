@@ -4,42 +4,69 @@
 
 | 本文节 | 内容 | SKILL.md 对应位置 |
 |---|---|---|
-| § 一 | Word 转 Markdown 命令 | 阶段0步骤3 |
+| § 一 | Word/Excel 转换脚本（禁止自写） | 阶段0步骤3 |
 | § 二 | 状态迁移用例技巧 | 阶段3维度3、阶段4 |
 | § 三 | 接口测试补充清单（超时/幂等/签名/联动） | 阶段4维度5补充检查 |
 | § 四 | 用例裂变（保留对照，待优化后合并） | 阶段4用例裂变规则 |
 | § 五 | 功能操作偏离7类详细提问 | 阶段3维度4矩阵填写 |
 | § 六 | 回归影响分析方法（codemap） | 阶段4输出要求第7条 |
+| § 七 | 测试用例转 XMind（须用户同意） | 阶段4结束后 |
 
 ---
 
-## 一、Word 转 Markdown
+## 一、Word / Excel 转 Markdown
 
-目标：把 `input/<需求名>/**/*.docx|*.doc` 转成同名 `.md`，保留原文件。优先用已安装的工具，按下面顺序尝试，成功即可。
+目标：把版本目录 `input/prodword/` 与 `input/reference/` 下的 `.docx` / `.xlsx` 转成同名 `.md`，保留原文件；Word 图片抽到 `input/prodword/prodword_pic/`。
 
-### .docx
-1. **pandoc（首选）**：
-   ```bash
-   pandoc "输入.docx" -o "输入.md" --extract-media=./media
-   ```
-2. pandoc 不可用时，用 Python `mammoth`（更好地保留语义）或 `python-docx`：
-   ```bash
-   pip install mammoth
-   python -c "import mammoth,sys;print(mammoth.convert_to_markdown(open(sys.argv[1],'rb')).value)" "输入.docx" > "输入.md"
-   ```
+### 唯一入口（必须走脚本，禁止自写）
 
-### .doc（旧二进制格式，pandoc 不直接支持）
-1. 用 LibreOffice 先转 docx 再转 md：
-   ```bash
-   soffice --headless --convert-to docx "输入.doc" --outdir "."
-   ```
-   然后按 .docx 流程处理。
-2. 上述都不可用时：提示用户「.doc 缺少转换工具，请另存为 .docx 或 .md 后重试」，不要硬猜内容。
+阶段0 **只允许**调用：
+
+```bash
+python "<本skill目录>/scripts/convert_version_inputs_utf8.py" "<项目根目录>" --version-prefix "V1.6.1"
+```
+
+含中文版本名时优先 `--version-prefix`（能唯一匹配即可）。不要把版本名写进项目里的临时 txt。
+
+该 wrapper 会调用同目录 `scripts/convert_to_md.py`：
+
+- 用 `python-docx` 按文档顺序输出标题/段落/**Markdown 表格**
+- 抽取图片到指定 `prodword_pic/`
+- `.xlsx` 按 sheet 转成 Markdown 表
+- 保留 `.docx` / `.xlsx` 原文件
+
+缺依赖时安装后重跑脚本，不要改写转换器：
+
+```bash
+pip install python-docx openpyxl
+```
+
+也可对单个目录手工调用（一般不需要，阶段0用 wrapper）：
+
+```bash
+python "<本skill目录>/scripts/convert_to_md.py" "<prodword绝对路径>" --pic-dir "<prodword_pic绝对路径>"
+python "<本skill目录>/scripts/convert_to_md.py" "<reference绝对路径>" --pic-dir "<prodword_pic绝对路径>"
+```
+
+路径一律用 `list_version_inputs_utf8.py` JSON 里的绝对路径，避免 Windows 中文路径乱码。
+
+### ⛔ 禁止（V1.6.1 阶段0 踩过的坑）
+
+- ❌ 在项目 / `.test-standards/` 下新建 `_convert_docx.py`、`_version_name_utf8.txt` 等临时文件
+- ❌ `python -c` 内嵌 mammoth / python-docx / 自写转换器
+- ❌ 把 **mammoth** 当默认转换器：它会把 Word **表格展成连续段落**，配置项/字段表结构丢失，必须重转
+- ❌ 因本机没有 pandoc，就现场写一套转换逻辑
+- ❌ 用 PowerShell `>` 重定向生成 md（编码易乱）
+
+### .doc（旧二进制）
+
+本脚本不转换 `.doc`。提示用户另存为 `.docx` 或 `.md` 后重跑 `convert_version_inputs_utf8.py`，不要硬猜内容。
 
 ### 转换后自检
-- 表格是否完整（需求里的配置/字段表格最重要，丢了要重转）。
+
+- 表格是否仍是 Markdown 表（需求里的配置/字段表格最重要；若变成一行一个单元格，说明误用了 mammoth，重跑内置脚本）。
 - 是否有乱码（编码问题）。
-- 图片转成了引用即可，看不到图时在对应位置标注「[图片，需人工查看原文件]」。
+- 图片转成了引用即可；看不到图时在对应位置标注「[图片，需人工查看原文件]」。
 
 ---
 
@@ -130,3 +157,69 @@ SKILL.md 阶段4维度5已覆盖：错误码逐值、请求参数传参逻辑、
 2. 打开对应 `codemap` 代码地图，定位这些 Handler，看它们还被哪些流程/节点复用。
 3. 重点查代码地图的「风险区域」「修改热点」段落（如额度占用释放、运营中台幂等、事务完整性）。
 4. 输出：改动点 → 受影响功能 → 风险等级 → 必回归用例。
+
+---
+
+## 七、测试用例转 XMind（须用户同意）
+
+对应 SKILL.md「转 XMind」。`04-测试用例.md` 写完后先问用户，**同意后再转**；不要在阶段4同一回合自动执行。
+
+### 调用
+
+```bash
+python "<本skill目录>/scripts/convert_cases_to_xmind_utf8.py" "<项目根目录>" --version-prefix "V1.6.1"
+```
+
+默认读 `.test-standards/<版本>/output/04-测试用例.md`，写 `.test-standards/<版本>/output/<版本>.xmind`。
+
+底层实现是同目录 `scripts/cases_to_xmind.py`。Agent 不要自写 XMind 转换器，也不要再找已废弃的 `tc-convert` skill。
+
+### 同意 / 拒绝
+
+- **同意后再转**：同意、好、要、可以、转、转 XMind、转xmind、转脑图、生成 xmind、md to xmind、转换成脑图。
+- **不转**：不需要、不用、先不转、下次再说、只要 md。
+- 用户只说「继续」且未提转换：再确认一句，不要直接转。
+- 后续单独说「把该版本转 XMind」且 md 已存在：视为同意，可直接调用。
+
+### 表头
+
+脚本只识别下列列，不要增列：
+
+```markdown
+| 用例等级 | 所属模块 | 用例标题 | 前置条件 | 用例步骤 | 预期结果 |
+```
+
+- `用例等级`：必填，仅 `1`–`4`，映射 XMind `priority-1`～`priority-4`；**不**把 `【等级N】` 写进标题。
+- `所属模块`：必填，按 `/` 分层，例如 `建档/自主建档/线上授权书`。
+- `用例标题`：必填，可按 `/` 拆成父节点与子节点，例如 `授权流程/线上授权书提交`。
+- `用例步骤`：必填，`<br>` 分隔多步；转换后全部步骤合并为一个多行子节点，不再创建「用例步骤」中间节点。
+- `预期结果`：必填，中文分号 `；` 分隔多条断言；转换后编号为 `1、xxx`、`2、yyy`，挂在步骤节点下。
+- `前置条件`：非必填，写入用例标题最后一个子节点备注。
+- 表头不符时先改 md 再转；脚本只做格式转换，不改业务语义。
+
+### 层级与图标
+
+- 根节点：版本目录名；结构固定为逻辑图向右（`org.xmind.ui.logic.right`）。
+- 中间节点：`所属模块` 按 `/` 拆分。
+- 用例名称：`用例标题` 按 `/` 拆成父节点链；只有一级时，该节点同时承担起始父节点与末级子节点。
+- 用例名称第一个父节点加 `task-done`；末级子节点按等级加 `priority-N`。
+- 标题没有 `/` 时，同一节点同时加 `task-done` 与 `priority-N`。
+
+示例（`用例标题=授权流程/线上授权书提交`，`预期结果=页面展示授权表单；提交成功并返回结果页`）：
+
+```text
+授权流程                          ← 起始父节点，图标：任务完成 (task-done)
+└── 线上授权书提交                ← 末级子节点，图标：任务优先级 (priority-N)
+    └── 1. 打开授权页面           ← 全部步骤合并为一个子节点
+        │   2. 填写并提交
+        ├── 1、页面展示授权表单   ← 预期节点，挂在步骤节点下、彼此同级
+        └── 2、提交成功并返回结果页
+```
+
+| 用例等级 | XMind markerId |
+|---|---|
+| `1` | `priority-1` |
+| `2` | `priority-2` |
+| `3` | `priority-3` |
+| `4` | `priority-4` |
+

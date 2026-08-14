@@ -105,8 +105,20 @@ if "!FOUND_SKILL!"=="0" (
   echo [WARN] No skill directories with SKILL.md found under: %REPO_DIR%
 )
 
+rem tc-convert has been merged into tc-gen
+call :remove_deprecated_skill "tc-convert"
+
 set "SYNCED_ANY=1"
 echo.
+exit /b 0
+
+:remove_deprecated_skill
+set "DEP_NAME=%~1"
+set "DEP_DST=%TARGET_ROOT%\%DEP_NAME%"
+if exist "%DEP_DST%" (
+  echo [INFO] Removing deprecated skill: %DEP_NAME%
+  rmdir /s /q "%DEP_DST%"
+)
 exit /b 0
 
 :copy_skill

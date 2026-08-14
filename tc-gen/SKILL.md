@@ -1,6 +1,6 @@
 ---
 name: tc-gen
-description: 基于版本迭代需求文档，结合本地 .dev-standards 代码知识库、业务文档、代码地图、流程定义和三方接口文档，分阶段生成有证据链的测试概要与测试用例；MCP 可选增强。用于用户说 tc-gen、初始化版本、生成测试概要、生成测试用例、做变更影响分析或精准回归时。
+description: 基于版本迭代需求文档，结合本地 .dev-standards 代码知识库、业务文档、代码地图、流程定义和三方接口文档，分阶段生成有证据链的测试概要与测试用例；MCP 可选增强。阶段4完成后须询问是否转为 XMind，用户同意后再转换。用于用户说 tc-gen、初始化版本、生成测试概要、生成测试用例、转 XMind、md to xmind、做变更影响分析或精准回归时。
 ---
 
 # tc-gen：新需求测试用例生成
@@ -29,10 +29,8 @@ description: 基于版本迭代需求文档，结合本地 .dev-standards 代码
   - 示例：若技能装在当前软件 skills 下的 `tc-gen/`，则执行
     `python "<本skill目录>/scripts/init_version_utf8.py" ...`
   - Agent 运行前须把 `<本skill目录>` 解析为加载本 skill 时的真实绝对路径。
-- 跨 skill 脚本（如 `tc-convert`）相对于**当前软件的 skills 根目录**，记作 `<当前软件skills目录>`。
-  - 以实际加载本 skill 的软件为准（例如 Cursor 的 skills 根、Trae 的 skills 根），不要写死某一产品目录名。
-  - Agent 执行前须解析为绝对路径。
-- 下文命令中的 `"<本skill目录>/scripts/..."` / `"<当前软件skills目录>/..."` 仅为占位符。
+- Word/Excel → md、测试用例 md → XMind 均在本 skill 的 `scripts/` 下，**不再依赖独立的 `tc-convert` skill**。
+- 下文命令中的 `"<本skill目录>/scripts/..."` 仅为占位符。
 
 初始化规则：
 
@@ -72,6 +70,7 @@ python "<本skill目录>/scripts/init_version_utf8.py" "<项目根目录>" --ver
 - 含中文版本名时优先使用 `--version-file`，版本名文件必须以 UTF-8 或 UTF-8 with BOM 保存。
 - 初始化脚本只创建目录，不覆盖已有输入文件和阶段产物。
 - Agent 不得用 shell 内嵌中文命令创建版本目录，例如 `mkdir ".test-standards/V1.0.0-支付宝"`、`New-Item`、`python -c "..."`。
+- 若必须使用 `--version-file`：用 Python 写到系统临时目录（`tempfile.gettempdir()`），**禁止**写进项目或 `.test-standards/`。阶段0 含中文版本名时优先 `--version-prefix`，不要为此在项目里落临时 txt。
 
 ### 版本输入发现要求
 
@@ -90,6 +89,22 @@ python "<本skill目录>/scripts/list_version_inputs_utf8.py" "<项目根目录>
 
 - 脚本输出 JSON，包含 `versionRoot`、`input/prodword`、`prodword_pic`、`input/reference`、`output` 的存在性和文件清单。后续读取、转换、图片解析必须以该 JSON 中的绝对路径为准。
 - 若 `Glob` 返回 0 个文件但脚本能找到文件，以脚本结果为准；不得据此判断用户未初始化或未放文件。
+- 含中文版本名时：**优先 `--version-prefix`（ASCII 前缀能唯一匹配即可）**。不要把版本名临时文件写进项目或 `.test-standards/`。
+
+### 阶段0 Word/Excel 转换要求（禁止自写脚本）
+
+阶段0 发现 `.docx` / `.xlsx` 后，**必须**调用本 skill 内置脚本转换，禁止 Agent 现场编写转换脚本：
+
+```bash
+python "<本skill目录>/scripts/convert_version_inputs_utf8.py" "<项目根目录>" --version-prefix "V1.6.1"
+```
+
+- 该脚本会转换 `input/prodword/` 与 `input/reference/` 下的 `.docx` / `.xlsx` 为同名 `.md`（保留原文件），并把 Word 图片抽到 `input/prodword/prodword_pic/`。
+- 底层转换实现是同目录 `scripts/convert_to_md.py`（保留表格为 Markdown 表）。Agent 不要绕过 wrapper 自己拼 pandoc / mammoth / `python -c`。
+- **禁止**：在项目或 `.test-standards/` 下新建 `_convert_*.py`、`_version_name_utf8.txt` 等临时文件；禁止 `python -c` 内嵌 mammoth/python-docx；禁止因 pandoc 不在 PATH 就手写转换器。
+- 原因：mammoth 会把 Word 表格展成段落，配置/字段表丢失结构；现场脚本还容易把临时文件留在需求目录。
+- `.doc`（旧二进制）本脚本不转：在阶段0摘要提示用户另存为 `.docx` 后重跑，不要硬猜内容。
+- 转换细节与自检见 `reference.md` § 一。
 
 ## 代码知识库路径规则
 
@@ -154,7 +169,7 @@ python "<本skill目录>/scripts/list_version_inputs_utf8.py" "<项目根目录>
 - 本地代码知识库（只读，默认）：`.dev-standards/knowledge/business/`、`.dev-standards/knowledge/codemap/`、`.dev-standards/knowledge/service/`、`.dev-standards/procdefs/`；若用户另行指定知识库根路径，则在该根路径下按同样相对结构查找。
 - MCP知识源（可选）：`user-dev-standards` 下的业务规则、服务知识、需求校验、代码规范工具。
 - 用例格式使用本技能内置的阶段4模板，固定字段为：`用例等级`、`所属模块`、`用例标题`、`前置条件`、`用例步骤`、`预期结果`。其中 `前置条件` 非必填；执行 `tc-gen` 时不需要额外读取 `.test-standards/templates/测试用例模板.md`。
-- 各阶段细节参照同目录 `reference.md`：§ 一 Word转换命令、§ 二 状态迁移技巧、§ 三 接口测试补充清单、§ 五 操作偏离7类提问、§ 六 回归分析方法。
+- 各阶段细节参照同目录 `reference.md`：§ 一 Word/Excel 转换脚本、§ 二 状态迁移技巧、§ 三 接口测试补充清单、§ 五 操作偏离7类提问、§ 六 回归分析方法、§ 七 XMind 转换（须用户同意）。
 
 ## 阶段进度清单
 
@@ -170,7 +185,7 @@ python "<本skill目录>/scripts/list_version_inputs_utf8.py" "<项目根目录>
 
 1. 明确当前处理的 `<版本>`；若用户未给出版本，先询问，不要把产物写到 `.test-standards` 根目录。
 2. 使用 `tc-gen/scripts/list_version_inputs_utf8.py` 列出 `.test-standards/<版本>/input/prodword/`、`.test-standards/<版本>/input/prodword/prodword_pic/` 和 `.test-standards/<版本>/input/reference/` 下的所有文件；Windows/中文路径场景禁止用 `Glob` 的空结果作为缺文件结论。
-3. 对每个 `.docx` / `.doc` 转换为同名 `.md` 放回 `input/prodword/`（保留原文件），并同步抽取 Word 内图片到 `input/prodword/prodword_pic/`。转换后的 md 中图片引用应尽量指向 `prodword_pic/` 下的文件；无法自动建立引用时，必须在 md 附近标注 `[图片：prodword_pic/<文件名>，需人工/AI查看]`。转换命令参照 `reference.md` § 一。
+3. 对 `input/prodword/` 与 `input/reference/` 下每个 `.docx` / `.xlsx` 转为同名 `.md`（保留原文件），Word 图片抽到 `input/prodword/prodword_pic/`。**必须**运行 `convert_version_inputs_utf8.py`（见上文「阶段0 Word/Excel 转换要求」），禁止自写转换脚本。转换后的 md 中图片引用应指向 `prodword_pic/`；无法自动建立引用时，在 md 附近标注 `[图片：prodword_pic/<文件名>，需人工/AI查看]`。表格必须仍是 Markdown 表（配置/字段表丢了要重跑脚本，不要改用 mammoth）。细节见 `reference.md` § 一。
 4. **正文 + 图片一起构成需求；禁止「只读字、假装图不存在」，也禁止「按目录读光所有图」。**  
    正确姿势：**先读全文建立骨架与缺口清单 → 再按缺口/优先级视觉读必要图片 → 每张读完立刻沉淀为可测试文字**。后续阶段以「正文 + 已沉淀的读图要点」为准，不依赖会话里留着原始像素。
 
@@ -448,6 +463,8 @@ python "<本skill目录>/scripts/list_version_inputs_utf8.py" "<项目根目录>
 
    结果处置按风险分级执行：高风险项（核心链路/资金口径/强监管/生产高频）未通过时必须返工补齐；中低风险项未通过时，可在产物中登记「未覆盖项、原因、影响评估、补偿性回归计划、预计补齐时间」，并经用户确认后继续输出。
 
+10. **阶段4收尾必须询问是否转 XMind**（见下文「转 XMind」）：写出 `04-测试用例.md` 并完成自检后停下询问，用户同意相关话术后才转换；禁止本阶段自动转。
+
 ### 内置用例模板
 
 阶段4生成 `04-测试用例.md` 时，直接使用以下模板：
@@ -467,7 +484,7 @@ python "<本skill目录>/scripts/list_version_inputs_utf8.py" "<项目根目录>
 - `所属模块`：支持按 `/` 分层级，后续转 XMind 使用。例如 `建档/自主建档/线上授权书`。
 - `用例标题`：单条原子用例标题，标题应能独立表达校验目标。
 - `用例步骤`：单路径、单组数据、单个明确动作链；多步用 `<br>` 或 `1. 2. 3.` 分隔。
-- `预期结果`：唯一明确预期，必须可断言。
+- `预期结果`：唯一明确预期，必须可断言。同一路径若有多条断言，用中文分号 `；` 分隔，供转 XMind 拆成编号子节点。
 
 非必填字段：
 
@@ -483,31 +500,92 @@ python "<本skill目录>/scripts/list_version_inputs_utf8.py" "<项目根目录>
 
 - 一条用例只覆盖一个明确校验点，禁止一条用例塞多个异常字段或多个分支。
 - `所属模块` 必须能形成 XMind 层级，不要为空。
-- `用例标题` 中不要手写等级，转 XMind 脚本会自动把等级标到标题上。
-- `用例步骤` 和 `预期结果` 内如需换行，优先使用 `<br>`。
+- `用例标题` 中不要手写等级；转 XMind 时用优先级图标表示等级，不要把 `【等级N】` 写进标题。
+- `用例步骤` 内如需换行，优先使用 `<br>`；转 XMind 后全部步骤会合并为一个多行节点。
+- `预期结果` 多条断言用中文分号 `；` 分隔，转 XMind 后会拆成 `1、xxx`、`2、yyy`。
 ```
 
-### 转 XMind
+### 转 XMind（阶段4完成后询问，禁止自动转）
 
-阶段4完成后，可用脚本把 `.test-standards/<版本>/output/04-测试用例.md` 转成 XMind：
+阶段4写出 `.test-standards/<版本>/output/04-测试用例.md` 并完成自检后，**必须停下来询问用户**，**禁止**在同一回合自动转 XMind。转换只做格式转换，不修改业务语义；表头不符合要求时先改 md 再转，禁止自写 XMind 转换器。
+
+固定询问话术（可微调，但必须明确征求同意）：
+
+> 阶段4测试用例已生成：`.test-standards/<版本>/output/04-测试用例.md`  
+> 是否转换为 XMind（`.test-standards/<版本>/output/<版本>.xmind`）？同意的话直接回复「转 XMind」或「同意」。
+
+**仅当用户明确同意后再调用脚本。** 同意类话术包括（不区分大小写）：同意、好、要、可以、转、转一下、转 XMind、转xmind、转成 xmind、转脑图、生成 xmind、md to xmind、转换成脑图。用户只说「继续」而未提转换时，不要转，再确认一句是否要 XMind。
+
+拒绝或不转：不需要、不用、先不转、下次再说、只要 md。记录「用户暂不转 XMind」后结束，不要调用脚本。
+
+用户同意后必须走内置脚本（含中文版本名优先 `--version-prefix`）：
 
 ```bash
-python "<当前软件skills目录>/tc-convert/scripts/cases_to_xmind.py" ".test-standards/<版本>"
+python "<本skill目录>/scripts/convert_cases_to_xmind_utf8.py" "<项目根目录>" --version-prefix "V1.6.1"
 ```
 
-也可以显式指定输入和输出：
+默认：
 
-```bash
-python "<当前软件skills目录>/tc-convert/scripts/cases_to_xmind.py" ".test-standards/<版本>/output/04-测试用例.md" ".test-standards/<版本>/output/<版本>.xmind"
+- 读：`.test-standards/<版本>/output/04-测试用例.md`
+- 写：`.test-standards/<版本>/output/<版本>.xmind`
+
+阶段4尚未产出 md 时禁止转 XMind。用户在后续单独说「把该版本转 XMind」且 md 已存在时，视为同意，可直接调用上述脚本。
+
+#### 用例表头要求（脚本只识别下列列）
+
+```markdown
+| 用例等级 | 所属模块 | 用例标题 | 前置条件 | 用例步骤 | 预期结果 |
 ```
 
-XMind 层级规则：
+字段规则：
 
-- 根节点：版本目录名称，例如 `V1.12.0-xxx`。
-- 中间节点：`所属模块` 按 `/` 拆分形成层级。
-- 用例节点：`用例标题`，脚本自动加等级前缀，如 `【等级1】xxx`。
-- 用例节点下包含：`用例步骤`、`预期结果`。
-- `前置条件` 如有，写入用例节点备注。
+- `用例等级`：必填，只允许 `1`、`2`、`3`、`4`；映射为 XMind 任务优先级图标，**不**把 `【等级N】` 写进标题。
+- `所属模块`：必填，支持 `/` 分层级，例如 `建档/自主建档/线上授权书`。
+- `用例标题`：必填，支持 `/` 拆成父节点与子节点，例如 `授权流程/线上授权书提交`。
+- `用例步骤`：必填，支持 `<br>` 分隔多步；转换后全部步骤合并为一个子节点（多行文本），不再创建「用例步骤」中间节点。
+- `预期结果`：必填，使用中文分号 `；` 分隔多条断言；转换后自动编号为 `1、xxx`、`2、yyy`，挂在步骤节点下。
+- `前置条件`：非必填；如果有，写入用例标题最后一个子节点备注。
+- 不要额外增加表格列。表头不符时先改 md 再转。
+
+#### XMind 层级
+
+- 根节点：版本目录名，例如 `V1.12.0-xxx`；结构固定为**逻辑图向右**（`org.xmind.ui.logic.right`）。
+- 中间节点：`所属模块` 按 `/` 拆分。
+- 用例名称：`用例标题` 按 `/` 拆成父节点链；若只有一级，则该节点同时承担起始父节点与末级子节点职责。
+- 用例名称末级子节点之后：所有步骤合并为一个子节点（多行文本），不再创建 `用例步骤` 中间节点。
+- 预期结果：按 `；` 拆分后，生成 `1、xxx`、`2、yyy` 等节点，按顺序作为步骤子节点的子节点挂载。
+
+示例（`用例标题=授权流程/线上授权书提交`，`预期结果=页面展示授权表单；提交成功并返回结果页`）：
+
+```text
+授权流程                          ← 起始父节点，图标：任务完成 (task-done)
+└── 线上授权书提交                ← 末级子节点，图标：任务优先级 (priority-N)
+    └── 1. 打开授权页面           ← 全部步骤合并为一个子节点
+        │   2. 填写并提交
+        ├── 1、页面展示授权表单   ← 预期节点，挂在步骤节点下、彼此同级
+        └── 2、提交成功并返回结果页
+```
+
+#### 图标映射
+
+任务进度（用例名称的第一个父节点）固定添加「任务完成」：
+
+| XMind markerId | 含义 |
+|---|---|
+| `task-done` | 任务完成 |
+
+任务优先级（用例名称的最后一个子节点）按 `用例等级` 添加：
+
+| 用例等级 | XMind markerId |
+|---|---|
+| `1` | `priority-1` |
+| `2` | `priority-2` |
+| `3` | `priority-3` |
+| `4` | `priority-4` |
+
+当 `用例标题` 只有一级、没有 `/` 拆分时，起始父节点与末级子节点为同一节点，同时添加 `task-done` 与对应 `priority-N`。
+
+补充约定：转换脚本只做格式转换，不改业务语义；PowerShell 写中文临时文件易乱码时，用 Python 或编辑器以 UTF-8 写入。更细的调用说明见 `reference.md` § 七。
 
 ## 注意事项
 
@@ -516,6 +594,8 @@ XMind 层级规则：
 - **不强制 MCP；MCP 调不通必须 fail-open，禁止重试卡死。** 若使用了 MCP，其结果只是辅助证据，不是最终真相；须和本地文档、代码地图、用户确认结论交叉校验。
 - 若业务文档、需求、（若有）MCP结果出现矛盾，明确指出并提示用户确认。
 - 阶段产物要写清楚来源，避免“AI拍脑袋”的测试点。
+- **阶段0 转换只用内置脚本**（`convert_version_inputs_utf8.py` / `convert_to_md.py`）。禁止自写 Word/Excel 转换脚本，禁止 mammoth 一行命令（会把表格展平），禁止把临时 `.py` / 版本名文件写进项目。
+- **阶段4 转 XMind 必须先问再转。** 写出 `04-测试用例.md` 后询问；用户同意相关话术后才调用 `convert_cases_to_xmind_utf8.py`。禁止阶段4结束时自动转；已无独立 `tc-convert` skill。
 - 需求文档图片可能含流程图或大量 UI 截图。阶段0必须抽取到 `prodword_pic/`，但**文本优先**：先读 md/reference 建图片索引；仅 `流程图/时序图/泳道图/状态图` 等专图着重视觉读；产品 UI 截图默认不视觉读。硬闸：**每轮最多 1 张图、读后必须先写可见要点、阶段0累计视觉读≤6**。禁止按 image1…N 连环读界面图（易卡在「思考中」）。阶段3用已沉淀文字摘要，默认禁止为过门禁再通读目录。
 - **代码知识库默认路径为 `.dev-standards`。** 找不到时必须询问用户是否有其他知识库目录；有则按用户路径继续，无则在用户确认后按需求/接口降级继续。
 - **不得以活源码替代任何知识库文档**。`codemap`、`business`、`procdefs` 均指代码知识库下的**静态文档**。当这些文档不存在且用户尚未确认处理方式时，必须停下来询问，绝不自行读取 `.java`/`.xml`/`.yml` 等活源码作为替代。

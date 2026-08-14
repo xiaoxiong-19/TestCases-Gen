@@ -257,7 +257,7 @@ def write_xmind(content: List[dict], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     active_sheet_id = content[0]["id"]
     metadata = {
-        "creator": {"name": "tc-convert", "version": "2.4.1"},
+        "creator": {"name": "tc-gen", "version": "2.4.1"},
         "activeSheetId": active_sheet_id,
     }
     manifest = {

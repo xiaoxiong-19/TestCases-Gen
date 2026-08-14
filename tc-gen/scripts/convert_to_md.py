@@ -2,12 +2,17 @@
 
 Usage:
   python convert_to_md.py <directory>
+  python convert_to_md.py <directory> --pic-dir "<prodword_pic>"
+  python convert_to_md.py <directory> --json
 
 Behavior:
-  - Converts .docx to sibling .md.
-  - Extracts .docx images to <directory>/prodword_pic.
+  - Converts .docx to sibling .md, preserving tables as Markdown tables.
+  - Extracts .docx images to --pic-dir (default: <directory>/prodword_pic).
   - Converts .xlsx sheets to Markdown tables.
   - Keeps original files.
+
+Do not replace this script with pandoc/mammoth one-liners: mammoth flattens
+Word tables into paragraphs, which breaks requirement config/field tables.
 
 Dependencies:
   - python-docx for normal .docx parsing
@@ -38,7 +43,14 @@ def safe_name(value: str) -> str:
 
 
 def cell_text(cell) -> str:
-    return " ".join((cell.text or "").split())
+    texts = []
+    for paragraph in getattr(cell, "paragraphs", []) or []:
+        text = (paragraph.text or "").strip().replace("|", "\\|")
+        if text:
+            texts.append(text)
+    if texts:
+        return "<br>".join(texts)
+    return " ".join((cell.text or "").split()).replace("|", "\\|")
 
 
 def heading_prefix(style_name: str) -> str | None:
@@ -129,6 +141,8 @@ def docx_to_md(path: Path, pic_dir: Path) -> str:
             if text:
                 out.append(f"{hp} {text}" if hp else text)
             out.extend(image_lines)
+            if text or image_lines:
+                out.append("")
         elif tag == "tbl":
             t = Table(child, doc)
             rows = t.rows
@@ -142,7 +156,7 @@ def docx_to_md(path: Path, pic_dir: Path) -> str:
                 out.append("| " + " | ".join(cells) + " |")
             out.append("")
 
-    return "\n\n".join(out)
+    return "\n".join(out).strip() + "\n"
 
 
 def _el_text(el) -> str:
@@ -188,6 +202,8 @@ def docx_to_md_raw(path: Path, pic_dir: Path) -> str:
             if text:
                 out.append(f"{prefix} {text}" if prefix else text)
             out.extend(image_lines)
+            if text or image_lines:
+                out.append("")
         elif tag == "tbl":
             rows = child.findall(f"{W_NS}tr")
             if not rows:
@@ -204,7 +220,7 @@ def docx_to_md_raw(path: Path, pic_dir: Path) -> str:
                 out.append("| " + " | ".join(r) + " |")
             out.append("")
 
-    return "\n\n".join(out)
+    return "\n".join(out).strip() + "\n"
 
 
 def xlsx_to_md(path: Path) -> str:
@@ -231,7 +247,7 @@ def xlsx_to_md(path: Path) -> str:
         for r in rows[1:]:
             out.append("| " + " | ".join(r) + " |")
         out.append("")
-    return "\n\n".join(out)
+    return "\n".join(out).strip() + "\n"
 
 
 def iter_inputs(base: Path) -> Iterable[Path]:
@@ -247,38 +263,96 @@ def iter_inputs(base: Path) -> Iterable[Path]:
         yield f
 
 
-def main() -> int:
-    if len(sys.argv) < 2:
-        print("用法: python convert_to_md.py <目录路径>")
-        return 2
-
-    base = Path(sys.argv[1]).resolve()
-    if not base.exists() or not base.is_dir():
-        print(f"ERR 目录不存在: {base}")
-        return 1
-
-    pic_dir = base / "prodword_pic"
-    converted = 0
-    for f in iter_inputs(base):
-        md_path = f.with_suffix(".md")
+def convert_one(path: Path, pic_dir: Path, quiet: bool = False) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".docx":
         try:
-            if f.suffix.lower() == ".docx":
-                try:
-                    md = docx_to_md(f, pic_dir)
-                except Exception as e1:
-                    print(f"    python-docx 失败({e1})，改用 raw 解析")
-                    md = docx_to_md_raw(f, pic_dir)
-            else:
-                md = xlsx_to_md(f)
-            md_path.write_text(md, encoding="utf-8")
-            print(f"OK  {f.name} -> {md_path.name}  ({len(md)} chars)")
-            converted += 1
-        except Exception as e:
-            print(f"ERR {f.name}: {e}")
+            return docx_to_md(path, pic_dir)
+        except Exception as exc:
+            if not quiet:
+                print(f"    python-docx 失败({exc})，改用 raw 解析")
+            return docx_to_md_raw(path, pic_dir)
+    if suffix == ".xlsx":
+        return xlsx_to_md(path)
+    raise ValueError(f"unsupported suffix: {suffix}")
 
-    image_count = len(list(pic_dir.glob("*"))) if pic_dir.exists() else 0
-    print(f"完成，共转换 {converted} 个文件，抽取图片 {image_count} 张 -> {pic_dir}")
-    return 0
+
+def convert_directory(base: Path, pic_dir: Path | None = None, quiet: bool = False) -> dict:
+    """Convert .docx/.xlsx under base to sibling .md. Keep originals."""
+    base = Path(base).resolve()
+    resolved_pic = Path(pic_dir).resolve() if pic_dir is not None else base / "prodword_pic"
+    before_images = set(p.name for p in resolved_pic.iterdir() if p.is_file()) if resolved_pic.exists() else set()
+    converted = []
+    errors = []
+
+    if not base.exists() or not base.is_dir():
+        return {
+            "directory": str(base),
+            "exists": False,
+            "picDir": str(resolved_pic),
+            "converted": converted,
+            "errors": [{"name": str(base), "error": "directory does not exist"}],
+            "newImages": [],
+            "imageCount": 0,
+        }
+
+    for src in iter_inputs(base):
+        md_path = src.with_suffix(".md")
+        try:
+            md = convert_one(src, resolved_pic, quiet=quiet)
+            md_path.write_text(md, encoding="utf-8")
+            converted.append(
+                {
+                    "name": src.name,
+                    "source": str(src),
+                    "markdown": str(md_path),
+                    "chars": len(md),
+                }
+            )
+            if not quiet:
+                print(f"OK  {src.name} -> {md_path.name}  ({len(md)} chars)")
+        except Exception as exc:
+            errors.append({"name": src.name, "source": str(src), "error": str(exc)})
+            if not quiet:
+                print(f"ERR {src.name}: {exc}")
+
+    after_images = set(p.name for p in resolved_pic.iterdir() if p.is_file()) if resolved_pic.exists() else set()
+    new_images = sorted(after_images - before_images)
+    image_count = len(after_images)
+    return {
+        "directory": str(base),
+        "exists": True,
+        "picDir": str(resolved_pic),
+        "converted": converted,
+        "errors": errors,
+        "newImages": new_images,
+        "imageCount": image_count,
+    }
+
+
+def parse_args(argv: List[str]):
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Convert .docx/.xlsx in a directory to Markdown.")
+    parser.add_argument("directory", help="Directory that contains .docx/.xlsx files")
+    parser.add_argument("--pic-dir", help="Image output directory (default: <directory>/prodword_pic)")
+    parser.add_argument("--json", action="store_true", help="Also print a JSON report")
+    return parser.parse_args(argv)
+
+
+def main(argv: List[str] | None = None) -> int:
+    args = parse_args(argv if argv is not None else sys.argv[1:])
+    base = Path(args.directory).resolve()
+    pic_dir = Path(args.pic_dir).resolve() if args.pic_dir else None
+    report = convert_directory(base, pic_dir)
+    print(
+        f"完成，共转换 {len(report['converted'])} 个文件，抽取图片 {report['imageCount']} 张 -> {report['picDir']}"
+    )
+    if args.json:
+        import json
+
+        print(json.dumps({"ok": not report["errors"], **report}, ensure_ascii=True, indent=2))
+    return 1 if report["errors"] and not report["converted"] else 0
 
 
 if __name__ == "__main__":

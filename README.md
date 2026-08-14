@@ -4,8 +4,7 @@
 
 | Skill 目录 | 触发语 | 用途 |
 |---|---|---|
-| `tc-gen/` | `tc-gen` | 版本迭代：分阶段生成测试概要、测试用例、变更影响与回归清单 |
-| `tc-convert/` | `tc-convert` | 格式转换：测试用例 Markdown → XMind；另含 Word/Excel → Markdown 脚本 |
+| `tc-gen/` | `tc-gen` | 版本迭代：分阶段生成测试概要、测试用例、变更影响与回归清单；阶段4完成后询问并（用户同意后）转为 XMind |
 | `pic-to-vue/` | `proto-to-vue` / `pic-to-vue` | 原型图 → 低代码 `lls-*` Vue 页面（一次写完、少样例对照） |
 
 配套脚本：
@@ -32,9 +31,9 @@ update-local-skills.bat
 
 ---
 
-## 测试提效：`tc-gen` + `tc-convert`
+## 测试提效：`tc-gen`
 
-推荐链路：先用 `tc-gen` 初始化版本并分阶段产出，需要转脑图时用 `tc-convert`（也可单独调用）。
+推荐链路：用 `tc-gen` 初始化版本并分阶段产出；阶段4写完 `04-测试用例.md` 后，Agent 会询问是否转 XMind，**用户同意后再转**。
 
 ### 版本目录结构
 
@@ -133,16 +132,14 @@ tc-gen 为 V1.12.0-xxx 生成阶段4详细测试用例
 - `前置条件`：非必填；转 XMind 后写入备注。
 - `用例步骤` / `预期结果`：多步优先用 `<br>`；预期必须可断言。
 
-细节见 `tc-gen/reference.md`（Word 转换、状态迁移、接口补充清单、操作偏离提问、回归分析等）。
+细节见 `tc-gen/reference.md`（Word 转换、状态迁移、接口补充清单、操作偏离提问、回归分析、XMind 转换等）。
 
-### `tc-convert`
+### 测试用例 Markdown → XMind（阶段4之后，须用户同意）
 
-只做格式转换，不做测试设计。Skill 主路径是 **Markdown → XMind**；仓库内仍保留 `scripts/convert_to_md.py`，供阶段0 / 手工把 Word、Excel 转成 Markdown。
-
-#### 测试用例 Markdown → XMind
+阶段4写出 `04-测试用例.md` 后，Agent **先询问**是否转换为 XMind，禁止自动转。用户回复同意类话术（如「转 XMind」「同意」「转脑图」）后再执行：
 
 ```bash
-python "<当前软件skills目录>/tc-convert/scripts/cases_to_xmind.py" ".test-standards/<版本>"
+python "<本skill目录>/scripts/convert_cases_to_xmind_utf8.py" "<项目根>" --version-prefix "V1.6.1"
 ```
 
 默认：
@@ -150,40 +147,51 @@ python "<当前软件skills目录>/tc-convert/scripts/cases_to_xmind.py" ".test-
 - 读：`.test-standards/<版本>/output/04-测试用例.md`
 - 写：`.test-standards/<版本>/output/<版本>.xmind`
 
-也可显式指定输入输出路径。
+也可在后续单独说「把该版本转 XMind」（md 已存在即视为同意）。
 
-XMind 层级要点：
+XMind 层级要点（与原 tc-convert 要求一致）：
 
-- 根节点：版本名（逻辑图向右）。
+- 根节点：版本名；结构固定为逻辑图向右（`org.xmind.ui.logic.right`）。
 - 中间层：`所属模块` 按 `/` 拆分。
-- 用例标题可再按 `/` 拆父/子节点；等级映射为 `priority-1`～`priority-4`。
-- 步骤合并为一个子节点；预期结果按中文分号 `；` 拆成编号子节点。
+- 用例标题可再按 `/` 拆父/子节点；起始父节点 `task-done`，末级按等级 `priority-1`～`priority-4`（不把【等级N】写进标题）。
+- 全部步骤合并为一个多行子节点；预期结果按中文分号 `；` 拆成 `1、xxx`、`2、yyy` 挂在步骤节点下。
+- `前置条件` 写入末级用例节点备注。
+- 只识别固定六列表头；脚本只做格式转换，不改业务语义。
 
-#### Word / Excel → Markdown（脚本）
+### Word / Excel → Markdown（阶段0 内置脚本）
+
+阶段0 必须走版本 wrapper（同时转 prodword 与 reference，图片统一进 `prodword_pic/`）：
 
 ```bash
-python "<当前软件skills目录>/tc-convert/scripts/convert_to_md.py" ".test-standards/<版本>/input/prodword"
+python "<本skill目录>/scripts/convert_version_inputs_utf8.py" "<项目根>" --version-prefix "V1.6.1"
+```
+
+单目录手工转换：
+
+```bash
+python "<本skill目录>/scripts/convert_to_md.py" ".test-standards/<版本>/input/prodword"
 ```
 
 - `.docx` → 同名 `.md`，图片抽到 `prodword_pic/`
 - `.xlsx` → Markdown 表格
 - 保留原始文件不删除
+- **不要**用 pandoc / mammoth 或现场编写转换脚本（mammoth 会把 Word 表格展平）
 
-阶段0也可按 `tc-gen/reference.md` § 一优先用 pandoc / mammoth 等工具。
+已无独立 `tc-convert` skill；上述脚本均在 `tc-gen/scripts/`。
 
 ### 推荐工作流（测试）
 
 1. `tc-gen 初始化版本 V1.12.0-xxx`
 2. 放入 `input/prodword/`、`input/reference/`
 3. 逐阶段执行 0→4，每阶段确认后再继续
-4. `tc-convert` 将 `04-测试用例.md` 转为 `<版本>.xmind`
+4. 阶段4结束后，若同意转脑图，再生成 `<版本>.xmind`
 
 使用建议：
 
-- `tc-gen` 负责分析与设计，`tc-convert` 只负责转换。
 - 流程图 / 泳道图 / 时序图对阶段3偏离矩阵很重要；阶段0要按缺口读图，不要无差别通读全部 UI 截图。
 - 阶段3门禁未满足时不要直接生成概要。
 - 阶段4保持原子用例，方便评审与转 XMind。
+- 不要在用户未同意时自动转 XMind。
 
 ---
 
@@ -244,15 +252,14 @@ TestCases-Gen/
 │   ├── reference.md
 │   └── scripts/
 │       ├── init_version_utf8.py
-│       └── list_version_inputs_utf8.py
-├── tc-convert/
-│   ├── SKILL.md
-│   └── scripts/
-│       ├── cases_to_xmind.py
-│       └── convert_to_md.py
+│       ├── list_version_inputs_utf8.py
+│       ├── convert_version_inputs_utf8.py  # 阶段0：docx/xlsx → md
+│       ├── convert_to_md.py
+│       ├── convert_cases_to_xmind_utf8.py  # 阶段4后用户同意：md → xmind
+│       └── cases_to_xmind.py
 └── pic-to-vue/
     ├── SKILL.md              # 正文标题：proto-to-vue
     └── reference.md
 ```
 
-脚本路径不要写死某一 IDE 私有目录；以**本 skill 安装目录**或**当前软件 skills 根目录**解析绝对路径后再执行。
+脚本路径不要写死某一 IDE 私有目录；以**本 skill 安装目录**解析绝对路径后再执行。
