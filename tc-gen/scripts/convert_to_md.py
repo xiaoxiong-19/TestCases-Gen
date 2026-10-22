@@ -9,6 +9,9 @@ Behavior:
   - Converts .docx to sibling .md, preserving tables as Markdown tables.
   - Extracts .docx images to --pic-dir (default: <directory>/prodword_pic).
   - Converts .xlsx sheets to Markdown tables.
+  - If openpyxl rejects a stylesheet (empty fill nodes, expected Fill),
+    retries from a temp copy with those fills repaired, then without styles.
+    The original .xlsx is never modified; only cached cell values are exported.
   - Keeps original files.
 
 Do not replace this script with pandoc/mammoth one-liners: mammoth flattens
@@ -22,10 +25,12 @@ Dependencies:
 from __future__ import annotations
 
 import re
+import shutil
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Tuple
 from xml.etree import ElementTree as ET
 
 from utf8_paths import configure_stdio
@@ -244,31 +249,105 @@ def docx_to_md_raw(path: Path, pic_dir: Path) -> str:
     return "\n".join(out).strip() + "\n"
 
 
-def xlsx_to_md(path: Path) -> str:
+_EMPTY_FILL = re.compile(
+    r"<(?P<prefix>[\w.]+:)?fill\s*/>"
+    r"|<(?P<prefix2>[\w.]+:)?fill\s*>\s*</(?P<prefix3>[\w.]+:)?fill>"
+)
+
+
+def _is_style_load_error(exc: BaseException) -> bool:
+    message = f"{type(exc).__name__}: {exc}".lower()
+    return "openpyxl.styles" in message or "fill() takes no arguments" in message
+
+
+def _replace_empty_fills(styles_xml: str) -> Tuple[str, int]:
+    def replacer(match: re.Match) -> str:
+        prefix = match.group("prefix") or match.group("prefix2") or ""
+        return f"<{prefix}fill><{prefix}patternFill patternType=\"none\"/></{prefix}fill>"
+
+    updated, count = _EMPTY_FILL.subn(replacer, styles_xml)
+    return updated, count
+
+
+def _rewrite_xlsx(source: Path, target: Path, styles_xml: bytes | None) -> None:
+    """Write a temp xlsx. styles_xml=None drops xl/styles.xml so values can still be read."""
+    with zipfile.ZipFile(source, "r") as archive:
+        entries = [(info, archive.read(info.filename)) for info in archive.infolist()]
+    with zipfile.ZipFile(target, "w") as archive:
+        for info, data in entries:
+            if info.filename == "xl/styles.xml":
+                if styles_xml is None:
+                    continue
+                data = styles_xml
+            archive.writestr(info, data)
+
+
+def _open_xlsx(path: Path):
+    """Open an xlsx for value export. Original file is not modified.
+
+    Some workbooks contain empty ``<fill/>`` nodes. openpyxl then raises
+    ``TypeError: expected Fill`` while reading styles, before any cell is read.
+    Retry on a temp copy with those nodes replaced, then with the stylesheet removed.
+    """
     import openpyxl
 
-    wb = openpyxl.load_workbook(str(path), data_only=True, read_only=True)
-    out: List[str] = []
-    for ws in wb.worksheets:
-        rows: List[List[str]] = []
-        for row in ws.iter_rows(values_only=True):
-            if row is None:
+    try:
+        return openpyxl.load_workbook(str(path), data_only=True, read_only=True), None
+    except Exception as first_error:
+        if not _is_style_load_error(first_error):
+            raise
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="tcgen-xlsx-"))
+    try:
+        with zipfile.ZipFile(path) as archive:
+            styles_text = archive.read("xl/styles.xml").decode("utf-8")
+        repaired_text, replaced = _replace_empty_fills(styles_text)
+        if replaced:
+            repaired = temp_dir / "repaired.xlsx"
+            _rewrite_xlsx(path, repaired, repaired_text.encode("utf-8"))
+            try:
+                workbook = openpyxl.load_workbook(str(repaired), data_only=True, read_only=True)
+                return workbook, temp_dir
+            except Exception as repaired_error:
+                if not _is_style_load_error(repaired_error):
+                    raise
+        stripped = temp_dir / "nostyle.xlsx"
+        _rewrite_xlsx(path, stripped, None)
+        workbook = openpyxl.load_workbook(str(stripped), data_only=True, read_only=True)
+        return workbook, temp_dir
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
+
+
+def xlsx_to_md(path: Path) -> str:
+    workbook, temp_dir = _open_xlsx(path)
+    try:
+        out: List[str] = []
+        for ws in workbook.worksheets:
+            rows: List[List[str]] = []
+            for row in ws.iter_rows(values_only=True):
+                if row is None:
+                    continue
+                vals = ["" if v is None else md_cell(str(v).replace("\n", "<br>").strip()) for v in row]
+                if any(v for v in vals):
+                    rows.append(vals)
+            if not rows:
                 continue
-            vals = ["" if v is None else md_cell(str(v).replace("\n", "<br>").strip()) for v in row]
-            if any(v for v in vals):
-                rows.append(vals)
-        if not rows:
-            continue
-        out.append(f"## Sheet: {ws.title}")
-        width = max(len(r) for r in rows)
-        rows = [r + [""] * (width - len(r)) for r in rows]
-        header = rows[0]
-        out.append("| " + " | ".join(header) + " |")
-        out.append("| " + " | ".join(["---"] * width) + " |")
-        for r in rows[1:]:
-            out.append("| " + " | ".join(r) + " |")
-        out.append("")
-    return "\n".join(out).strip() + "\n"
+            out.append(f"## Sheet: {ws.title}")
+            width = max(len(r) for r in rows)
+            rows = [r + [""] * (width - len(r)) for r in rows]
+            header = rows[0]
+            out.append("| " + " | ".join(header) + " |")
+            out.append("| " + " | ".join(["---"] * width) + " |")
+            for r in rows[1:]:
+                out.append("| " + " | ".join(r) + " |")
+            out.append("")
+        return "\n".join(out).strip() + "\n"
+    finally:
+        workbook.close()
+        if temp_dir is not None:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def iter_inputs(base: Path) -> Iterable[Path]:

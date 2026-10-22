@@ -33,6 +33,7 @@ python "<本skill目录>/scripts/convert_version_inputs_utf8.py" "<项目根目�
 - 用 `python-docx` 按文档顺序输出标题/段落/**Markdown 表格**
 - 抽取图片到指定 `prodword_pic/`（段落图与**表格单元格内的图**都会写成 `![图片](prodword_pic/...)`）
 - `.xlsx` 按 sheet 转成 Markdown 表；单元格中的 `|` 会转义，避免把表拆坏
+- 原 `.xlsx` 若因样式表无法被 openpyxl 打开（空 `<fill/>` 导致 `expected Fill`，或其它样式解析错误），脚本在系统临时目录副本上补空填充后再读；仍失败则去掉样式表只导出单元格值。不改原始 Excel，也不要为此另写转换脚本
 - 保留 `.docx` / `.xlsx` 原文件
 
 缺依赖时安装后重跑脚本，不要改写转换器：

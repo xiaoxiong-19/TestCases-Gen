@@ -95,7 +95,7 @@ python "<本skill目录>/scripts/convert_version_inputs_utf8.py" "<项目根目�
 ```
 
 - 该脚本会转换 `input/prodword/` 与 `input/reference/` 下的 `.docx` / `.xlsx` 为同名 `.md`（保留原文件），并把 Word 图片抽到 `input/prodword/prodword_pic/`。
-- 底层转换实现是同目录 `scripts/convert_to_md.py`（保留表格为 Markdown 表）。Agent 不要绕过 wrapper 自己拼 pandoc / mammoth / `python -c`。
+- 底层转换实现是同目录 `scripts/convert_to_md.py`（保留表格为 Markdown 表）。Excel 样式表打不开时，脚本会在临时副本里修复空 `<fill/>` 或去掉样式后再导出单元格，不改原 xlsx。Agent 不要绕过 wrapper 自己拼 pandoc / mammoth / `python -c`，也不要为 `expected Fill` 另写修复脚本。
 - **禁止**：在项目或 `.test-standards/` 下新建 `_convert_*.py`、`_version_name_utf8.txt` 等临时文件；禁止 `python -c` 内嵌 mammoth/python-docx；禁止因 pandoc 不在 PATH 就手写转换器。
 - 原因：mammoth 会把 Word 表格展成段落，配置/字段表丢失结构；现场脚本还容易把临时文件留在需求目录。
 - `.doc` / `.xls`（旧格式）本脚本不转：在阶段0摘要提示用户另存为 `.docx` / `.xlsx` 后重跑，不要硬猜内容。
